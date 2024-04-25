@@ -15,6 +15,9 @@
 #include "display.h"
 /* The SD card functionality has been moved to its own separate file for this project. */
 #include "sdCard.h"
+#include "driver/gpio.h"
+#include "esp_intr_alloc.h"
+
 
 /*
 **====================================================================================
@@ -27,7 +30,7 @@
 #define PIN_NUM_CLK   12	/* SPI Clock pin */
 #define PIN_NUM_MOSI  11	/* SPI Master Out, Slave in  - The ESP32 transmits data over this pin */
 #define PIN_NUM_MISO  13	/* SPI Master In, Slave Out  - The ESP32 receives data over this pin. */
-
+#define BUTTON1 45
 /* Note that additional connections are required for the display to work. These are defined in display.c */
 /* PIN_NUM_DC         5  - Data/Control pin  		*/
 /* PIN_NUM_RST        3  - Display Reset pin 		*/
@@ -73,6 +76,10 @@ Private void drawGhost(void);
 ** Private variable declarations
 **====================================================================================
 */
+uint8_t grid[30][22];
+uint8_t dir = 0; //0 == right, 1 == down, 2 == left, 3 == up
+uint8_t xpos = 0;
+uint8_t ypos = 0;
 
 uint16_t * priv_frame_buffer;
 #ifdef GHOST_TEST
@@ -87,6 +94,15 @@ Private int ghost_direction = GHOST_SPEED;
 ** Public function definitions
 **====================================================================================
 */
+static void gpio_isr_handler(void* arg) {
+	if(dir < 3) {
+		dir++;
+	}
+	else {
+		dir = 0;
+	}
+
+}
 void app_main(void)
 {
 	uint8_t res;
@@ -107,15 +123,26 @@ void app_main(void)
 		 * Note that these devices are on the same SPI bus. The Chip Select pins allow us to
 		 * select and deselect them as needed. */
 		display_init();
-		sdCard_init();
-
 		display_fillRectangle(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, COLOR_ORANGE);
-		vTaskDelay(1000u / portTICK_PERIOD_MS);
+		sdCard_init();
+		gpio_config_t io_conf;
+		io_conf.intr_type = GPIO_INTR_LOW_LEVEL; // Trigger on falling edge
+		io_conf.mode = GPIO_MODE_INPUT;
+		io_conf.pin_bit_mask = (1ULL << BUTTON1);
+		io_conf.pull_down_en = 0; // Not enabling pull-down resistor
+		io_conf.pull_up_en = 1;   // Enable pull-up resistor
+		gpio_config(&io_conf);
+		gpio_install_isr_service(ESP_INTR_FLAG_LEVEL1);
+		gpio_isr_handler_add(BUTTON1, gpio_isr_handler, (void*) BUTTON1);
+
+
+
+		//vTaskDelay(1000u / portTICK_PERIOD_MS);
 
 		/* Load an image from the SD Card into the frame buffer */
-		sdCard_Read_bmp_file("/logo.bmp", priv_frame_buffer);
+		//sdCard_Read_bmp_file("/logo.bmp", priv_frame_buffer);
 
-		display_drawBitmap(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, priv_frame_buffer);
+		//display_drawBitmap(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, priv_frame_buffer);
 	}
 
 	/* Five second delay... */
@@ -138,6 +165,32 @@ void app_main(void)
 	/* Main CPU cycle */
 	while(1)
 	{
+
+		if(xpos < 30 && xpos >= 0 && ypos < 22 && ypos >= 0){
+			for(int i = 0; i < 30; i++) {
+				for(int j = 0; j < 22; j++) {
+					if(i == xpos && j == ypos) {
+						display_fillRectangle(i*10+10, j*10+10, 10, 10, COLOR_ORANGE);
+					}
+					else{
+						display_fillRectangle(i*10+10, j*10+10, 10, 10, COLOR_GREEN);
+					}
+				}
+			}
+			if(dir == 0) {
+				xpos++;
+			}
+			else if(dir == 1){
+				ypos++;
+			}
+			else if(dir  == 2) {
+				xpos--;
+			}
+			else if(dir == 3){
+				ypos--;
+			}
+		}
+		vTaskDelay(1000u / portTICK_PERIOD_MS);
 		vTaskDelayUntil( &xLastWakeTime, xFrequency );
 #ifdef GHOST_TEST
 		/* Simple test for drawing a moving bitmap on the screen. */

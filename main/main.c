@@ -15,6 +15,9 @@
 #include "display.h"
 /* The SD card functionality has been moved to its own separate file for this project. */
 #include "sdCard.h"
+#include "menulogic/menuhandler.h"
+#include "config/gameconfig.h"
+#include "config/state.h"
 
 /*
 **====================================================================================
@@ -64,6 +67,7 @@
 Private uint8_t initialize_spi(void);
 Private void drawRectangleInFrameBuf(int xPos, int yPos, int width, int height, uint16_t color);
 Private void drawBmpInFrameBuf(int xPos, int yPos, int width, int height, uint16_t * data_buf);
+Private void switchStateTo(enum AppState toState);
 #ifdef GHOST_TEST
 Private void drawGhost(void);
 #endif
@@ -87,9 +91,17 @@ Private int ghost_direction = GHOST_SPEED;
 ** Public function definitions
 **====================================================================================
 */
+struct GameConfigParameters *p_gameConfigParameters, params;
+struct ApplicationState *p_applicationState, appState;
+
 void app_main(void)
 {
 	uint8_t res;
+    params = GameConfigParameters_default;
+    p_gameConfigParameters = &params;
+
+    appState = defaultState;
+    p_applicationState = &appState;
 
 	/* Check how much RAM we have currently available... */
 	printf("Total available memory: %u bytes\n", heap_caps_get_total_size(MALLOC_CAP_8BIT));
@@ -113,19 +125,13 @@ void app_main(void)
 		vTaskDelay(1000u / portTICK_PERIOD_MS);
 
 		/* Load an image from the SD Card into the frame buffer */
-		sdCard_Read_bmp_file("/logo.bmp", priv_frame_buffer);
+		//sdCard_Read_bmp_file("/logo.bmp", priv_frame_buffer);
 
-		display_drawBitmap(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, priv_frame_buffer);
+		//display_drawBitmap(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, priv_frame_buffer);
 	}
 
 	/* Five second delay... */
 	vTaskDelay(5000u / portTICK_PERIOD_MS);
-
-#ifdef GHOST_TEST
-	priv_ghost_buffer = heap_caps_malloc(64*64*sizeof(uint16_t), MALLOC_CAP_DMA);
-	assert(priv_ghost_buffer);
-	sdCard_Read_bmp_file("/ghost.bmp", priv_ghost_buffer);
-#endif
 
 	/* The idea is that we will try to keep a cyclic process that is called every 40 milliseconds, we call our
 	 * drawing functions and then delay for the period remaining.
@@ -138,11 +144,29 @@ void app_main(void)
 	/* Main CPU cycle */
 	while(1)
 	{
+
+        switch (p_applicationState->menuState) {
+            case MAIN_MENU:
+                handleMainMenu(p_applicationState, p_gameConfigParameters);
+                break;
+            case SETTINGS:
+                handleSettings(p_applicationState, p_gameConfigParameters);
+                break;
+            case LEVEL_SELECT:
+                handleLevelSelect(p_applicationState, p_gameConfigParameters);
+                break;
+            case GAME:
+                handleGame(p_applicationState, p_gameConfigParameters);
+                break;
+            case END_GAME:
+                handleEndGame(p_applicationState, p_gameConfigParameters);
+                break;
+            default:
+                handleDefault(p_applicationState, p_gameConfigParameters);
+                break;
+        }
+
 		vTaskDelayUntil( &xLastWakeTime, xFrequency );
-#ifdef GHOST_TEST
-		/* Simple test for drawing a moving bitmap on the screen. */
-		drawGhost();
-#endif
 	}
 }
 
@@ -208,6 +232,11 @@ Private void drawBmpInFrameBuf(int xPos, int yPos, int width, int height, uint16
 			data_ptr++;
 		}
 	}
+}
+
+Private void switchStateTo(enum AppState toState)
+{
+    p_applicationState->menuState = toState;
 }
 
 #ifdef GHOST_TEST

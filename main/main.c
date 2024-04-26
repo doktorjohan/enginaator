@@ -20,9 +20,6 @@
 #include "esp_intr_alloc.h"
 #include "esp_timer.h"
 #include <time.h>
-#include "menulogic/menuhandler.h"
-#include "config/gameconfig.h"
-#include "config/state.h"
 
 /*
 **====================================================================================
@@ -76,6 +73,8 @@ Private uint8_t initialize_spi(void);
 Private void drawRectangleInFrameBuf(int xPos, int yPos, int width, int height, uint16_t color);
 Private void drawBmpInFrameBuf(int xPos, int yPos, int width, int height, uint16_t * data_buf);
 Private void switchStateTo(enum AppState toState);
+Private void handleGame();
+Private void handleGameEnded();
 #ifdef GHOST_TEST
 Private void drawGhost(void);
 #endif
@@ -114,6 +113,7 @@ uint16_t * curveL;
 uint16_t * curveU;
 uint16_t * toit;
 uint16_t * gameover;
+int doNotJiggleEndScreen = 0;
 #define MAX_SNAKE_LENGTH 100
 
 typedef struct {
@@ -121,17 +121,41 @@ typedef struct {
     int y;
 } Position;
 
+enum Level {
+    REGULAR,
+    ENGINAATOR,
+    OSC
+};
+
+struct GameConfigParameters {
+    uint8_t snakeSpeedIncrement;
+    uint8_t snakeSpeed;
+    uint8_t difficulty;
+    enum Level level;
+};
+
+enum AppState {
+    MAIN_MENU,
+    SETTINGS,
+    LEVEL_SELECT,
+    GAME,
+    END_GAME
+};
+
+struct ApplicationState {
+    enum AppState menuState;
+};
+
 Position snake[MAX_SNAKE_LENGTH]; // Array to store snake's body positions
 int snakeLength; // Current length of the snake
 
-
+struct ApplicationState applicationState;
+struct GameConfigParameters gameConfigParameters;
 /*
 **====================================================================================
 ** Public function definitions
 **====================================================================================
 */
-struct GameConfigParameters *p_gameConfigParameters, params;
-struct ApplicationState *p_applicationState, appState;
 
 uint16_t *get_snake_segment_image(int index) {
     if (index >= snakeLength || index < 0) return muru; // Safety check
@@ -310,9 +334,6 @@ void move_snake(void) {
     }
 }
 
-
-
-
 void draw_snake(void) {
 
 	//display_drawBitmap(snake[snakeLength+1].x * 10+10, snake[snakeLength+1].y * 10+10, 10, 10, muru);
@@ -361,11 +382,8 @@ void app_main(void)
 {
 
 	uint8_t res;
-    params = GameConfigParameters_default;
-    p_gameConfigParameters = &params;
-
-    appState = defaultState;
-    p_applicationState = &appState;
+    //p_gameConfigParameters = &params;
+    //p_applicationState = &appState;
 
 	/* Check how much RAM we have currently available... */
 	printf("Total available memory: %u bytes\n", heap_caps_get_total_size(MALLOC_CAP_8BIT));
@@ -377,6 +395,7 @@ void app_main(void)
     assert(sein);
     muru = heap_caps_malloc(10*10*sizeof(uint16_t), MALLOC_CAP_DMA);
     assert(muru);
+
     //pea
     peaR = heap_caps_malloc(10*10*sizeof(uint16_t), MALLOC_CAP_DMA);
     assert(peaR);
@@ -386,11 +405,13 @@ void app_main(void)
     assert(peaL);
     peaU = heap_caps_malloc(10*10*sizeof(uint16_t), MALLOC_CAP_DMA);
     assert(peaU);
+
     //keha
     kehaRL = heap_caps_malloc(10*10*sizeof(uint16_t), MALLOC_CAP_DMA);
     assert(kehaRL);
     kehaUD = heap_caps_malloc(10*10*sizeof(uint16_t), MALLOC_CAP_DMA);
     assert(kehaUD);
+
     //saba
     sabaR = heap_caps_malloc(10*10*sizeof(uint16_t), MALLOC_CAP_DMA);
     assert(sabaR);
@@ -400,6 +421,7 @@ void app_main(void)
     assert(sabaL);
     sabaU = heap_caps_malloc(10*10*sizeof(uint16_t), MALLOC_CAP_DMA);
     assert(sabaU);
+
     //curve
     curveR = heap_caps_malloc(10*10*sizeof(uint16_t), MALLOC_CAP_DMA);
     assert(curveR);
@@ -416,6 +438,7 @@ void app_main(void)
 
 	/*Call the function to initialize the SPI peripheral connected to the SD card. */
 	res = initialize_spi();
+
 
 	if(res == 1u)
 	{
@@ -497,57 +520,32 @@ void app_main(void)
 	TickType_t xLastWakeTime;
 	const TickType_t xFrequency = 40u / portTICK_PERIOD_MS;
 	xLastWakeTime = xTaskGetTickCount ();
+    applicationState.menuState = GAME;
 
 	/* Main CPU cycle */
-	int first = 0;
 	while(1)
 	{
-
-        switch (p_applicationState->menuState) {
+        switch (applicationState.menuState) {
             case MAIN_MENU:
-                handleMainMenu(p_applicationState, p_gameConfigParameters);
+                //handleMainMenu(p_applicationState, p_gameConfigParameters);
                 break;
             case SETTINGS:
-                handleSettings(p_applicationState, p_gameConfigParameters);
+                //handleSettings(p_applicationState, p_gameConfigParameters);
                 break;
             case LEVEL_SELECT:
-                handleLevelSelect(p_applicationState, p_gameConfigParameters);
+                //handleLevelSelect(p_applicationState, p_gameConfigParameters);
                 break;
             case GAME:
-                handleGame(p_applicationState, p_gameConfigParameters);
+                handleGame();
                 break;
             case END_GAME:
-                handleEndGame(p_applicationState, p_gameConfigParameters);
+                handleGameEnded();
                 break;
             default:
-                handleDefault(p_applicationState, p_gameConfigParameters);
+                //handleDefault(p_applicationState, p_gameConfigParameters);
                 break;
         }
 
-		//print_grid();
-		if(!game_ended){
-			for(int i = 0; i < 30; i++) {
-				for(int j = 0; j < 22; j++) {
-					display_drawBitmap(i*10+10, j*10+10, 10, 10, get_grid_image(i, j));
-
-				}
-			}
-			draw_snake();
-			move_snake();
-			change_alowed = true;
-		}
-		if(game_ended && first == 0){
-			printf("ended\n");
-			display_drawBitmap(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, gameover);
-			for(int i = 0; i < 32; i++) {
-				for(int j = 0; j < 24; j++) {
-					if(i == 0 || i == 31 || j == 0 || j == 23) {
-						display_drawBitmap(i*10, j*10, 10, 10, sein);
-					}
-				}
-			}
-			first = 1;
-		}
 		vTaskDelay(100u / portTICK_PERIOD_MS);
 		vTaskDelayUntil( &xLastWakeTime, xFrequency );
 	}
@@ -587,6 +585,36 @@ Private uint8_t initialize_spi(void)
     return 1u;
 }
 
+Private void handleGame() {
+    if(!game_ended){
+        for(int i = 0; i < 30; i++) {
+            for(int j = 0; j < 22; j++) {
+                display_drawBitmap(i*10+10, j*10+10, 10, 10, get_grid_image(i, j));
+
+            }
+        }
+        draw_snake();
+        move_snake();
+        change_alowed = true;
+    }
+    if(game_ended && doNotJiggleEndScreen == 0){
+        applicationState.menuState = END_GAME;
+    }
+}
+
+Private void handleGameEnded()
+{
+    printf("ended\n");
+    display_drawBitmap(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, gameover);
+    for(int i = 0; i < 32; i++) {
+        for(int j = 0; j < 24; j++) {
+            if(i == 0 || i == 31 || j == 0 || j == 23) {
+                display_drawBitmap(i*10, j*10, 10, 10, sein);
+            }
+        }
+    }
+    doNotJiggleEndScreen = 1;
+}
 
 Private void drawRectangleInFrameBuf(int xPos, int yPos, int width, int height, uint16_t color)
 {
@@ -617,10 +645,6 @@ Private void drawBmpInFrameBuf(int xPos, int yPos, int width, int height, uint16
 	}
 }
 
-Private void switchStateTo(enum AppState toState)
-{
-    p_applicationState->menuState = toState;
-}
 
 #ifdef GHOST_TEST
 Private void drawGhost(void)
